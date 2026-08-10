@@ -1,0 +1,9 @@
+build/
+dep/
+*.o
+*.d
+*.so
+*.so.*
+dist/
+*.tar.gz
+SESION.md
