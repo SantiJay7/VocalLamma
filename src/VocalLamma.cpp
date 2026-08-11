@@ -106,6 +106,9 @@ struct VocalLamma : Module {
 		EXT_INPUT,
 		GATE_INPUT,
 		INPUT_CV_INPUT,
+		FORMANT_CV_INPUT,
+		GLIDE_CV_INPUT,
+		GATE_TRIG_INPUT,
 		NUM_INPUTS
 	};
 	enum OutputIds {
@@ -127,6 +130,7 @@ struct VocalLamma : Module {
 	float phase = 0.f;
 	float voiceLevel = 0.f;
 	float gateLevel = 1.f;
+	float gateTrigPrev = 0.f;
 	float pitchJitter = 0.f;
 	float oqPhase = 0.f;
 	Bandpass formant[3];
@@ -134,8 +138,8 @@ struct VocalLamma : Module {
 
 	// Stereo delay state
 	static const int DELAY_BUFFER_SIZE = 1 << 19;
-	std::array<float, DELAY_BUFFER_SIZE> delayL;
-	std::array<float, DELAY_BUFFER_SIZE> delayR;
+	std::array<float, DELAY_BUFFER_SIZE> delayL{};
+	std::array<float, DELAY_BUFFER_SIZE> delayR{};
 	int delayIndex = 0;
 	float delayTime = 0.2f;
 
@@ -170,6 +174,9 @@ struct VocalLamma : Module {
 		configInput(EXT_INPUT, "External audio");
 		configInput(GATE_INPUT, "Gate");
 		configInput(INPUT_CV_INPUT, "Input mix CV");
+		configInput(FORMANT_CV_INPUT, "Formant CV");
+		configInput(GLIDE_CV_INPUT, "Glide CV");
+		configInput(GATE_TRIG_INPUT, "Gate trigger");
 
 		configOutput(LEFT_OUTPUT, "Left");
 		configOutput(RIGHT_OUTPUT, "Right");
@@ -202,6 +209,7 @@ struct VocalLamma : Module {
 		vibratoPhase = 0.f;
 		voiceLevel = 0.f;
 		gateLevel = 1.f;
+		gateTrigPrev = 0.f;
 		pitchJitter = 0.f;
 		oqPhase = 0.f;
 		midiNotes.clear();
@@ -275,7 +283,7 @@ struct VocalLamma : Module {
 		float jitterCoef = 1.f - std::exp(-1.f / (0.4f * sr));
 		pitchJitter += (random::normal() - pitchJitter) * jitterCoef;
 		float pitchVoct = params[PITCH_PARAM].getValue() + inputs[PITCH_INPUT].getVoltage() + midiPitchOct + pitchJitter * 0.08f;
-		float glide = params[GLIDE_PARAM].getValue();
+		float glide = clamp(params[GLIDE_PARAM].getValue() + inputs[GLIDE_CV_INPUT].getVoltage() * 0.5f, 0.f, 5.f);
 		float glideCoef = (glide > 0.f) ? 1.f - std::exp(-1.f / (glide * sr)) : 1.f;
 		pitchLog += (pitchVoct - pitchLog) * glideCoef;
 		outputs[PITCH_OUTPUT].setVoltage(pitchLog);
@@ -295,7 +303,7 @@ struct VocalLamma : Module {
 		vowelSmoothed += (vowelTarget - vowelSmoothed) * vowelCoef;
 		float formantF[3];
 		getFormants(vowelSmoothed, formantF);
-		float formantScale = 0.7f + 0.6f * clamp(params[FORMANT_PARAM].getValue() + midiFormant, 0.f, 1.f);
+		float formantScale = 0.7f + 0.6f * clamp(params[FORMANT_PARAM].getValue() + inputs[FORMANT_CV_INPUT].getVoltage() / 10.f + midiFormant, 0.f, 1.f);
 		for (int i = 0; i < 3; i++)
 			formantF[i] *= formantScale;
 
@@ -329,6 +337,14 @@ struct VocalLamma : Module {
 		voice += 0.6f * noiseFormant[2].process(noiseIn);
 
 		voice *= params[VOICE_PARAM].getValue();
+
+		// ---- Gate trigger: toggle the GATE ON latch on a rising edge ----
+		float gateTrig = inputs[GATE_TRIG_INPUT].getVoltage();
+		if (gateTrig > 1.f && gateTrigPrev <= 1.f) {
+			float cur = params[GATE_SWITCH_PARAM].getValue();
+			params[GATE_SWITCH_PARAM].setValue(cur > 0.5f ? 0.f : 1.f);
+		}
+		gateTrigPrev = gateTrig;
 
 		// ---- Gate: switch enables gate mode, voice sounds while gated ----
 		float gateTarget = 1.f;
@@ -418,12 +434,16 @@ struct TextLabel : Widget {
 
 
 /** Raster logo drawn with nanoVG. The panel SVG cannot embed raster images
-(the bundled nanoSVG ignores <image> elements), so we load the PNG ourselves
-and paint it into a box with an image pattern. */
+(the bundled nanoSVG ignores <image> elements), so we paint the PNG ourselves.
+The image is loaded in draw() from a stored path, since cached Image handles
+become invalid when a DAW editor window is reopened (see Migrate2 guide). */
 struct LogoWidget : Widget {
-	std::shared_ptr<window::Image> image;
+	std::string imagePath;
 
 	void draw(const DrawArgs& args) override {
+		if (imagePath.empty())
+			return;
+		std::shared_ptr<window::Image> image = APP->window->loadImage(imagePath);
 		if (!image || image->handle < 0)
 			return;
 		nvgBeginPath(args.vg);
@@ -443,7 +463,7 @@ struct VocalLammaWidget : ModuleWidget {
 		// Llama logo (replaces the old diamond motif; panel SVG cannot hold raster images)
 		{
 			LogoWidget* logo = new LogoWidget;
-			logo->image = APP->window->loadImage(asset::plugin(pluginInstance, "res/VocalLammaLogo.png"));
+			logo->imagePath = asset::plugin(pluginInstance, "res/VocalLammaLogo.png");
 			logo->box.pos = Vec(132.f - 13.f, 37.f);
 			logo->box.size = Vec(26.f, 25.8f);
 			addChild(logo);
@@ -454,19 +474,22 @@ struct VocalLammaWidget : ModuleWidget {
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(76.5, 27)), module, VocalLamma::VOWEL_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12, 45)), module, VocalLamma::GLIDE_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(33.5, 45)), module, VocalLamma::VIBRATO_PARAM));
+		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(55, 45)), module, VocalLamma::FORMANT_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(76.5, 45)), module, VocalLamma::VOWEL_ATT_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12, 58)), module, VocalLamma::VOICE_PARAM));
-		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(33.5, 58)), module, VocalLamma::FORMANT_PARAM));
 
-		// Gate button (latching, illuminated) and gate input
-		addParam(createParamCentered<VCVBezelLatch>(mm2px(Vec(55, 58)), module, VocalLamma::GATE_SWITCH_PARAM));
-		addChild(createLightCentered<VCVBezelLight<GreenLight>>(mm2px(Vec(55, 58)), module, VocalLamma::GATE_LIGHT));
+		// Gate button (latching, illuminated) next to the VOWEL knob
+		addParam(createParamCentered<VCVBezelLatch>(mm2px(Vec(55, 27)), module, VocalLamma::GATE_SWITCH_PARAM));
+		addChild(createLightCentered<VCVBezelLight<GreenLight>>(mm2px(Vec(55, 27)), module, VocalLamma::GATE_LIGHT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 69)), module, VocalLamma::GATE_INPUT));
 
 		// Vocal inputs
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 69)), module, VocalLamma::PITCH_INPUT));
-		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 69)), module, VocalLamma::VIBRATO_INPUT));
-		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 69)), module, VocalLamma::VOWEL_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 69)), module, VocalLamma::GLIDE_CV_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 58)), module, VocalLamma::VIBRATO_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 58)), module, VocalLamma::FORMANT_CV_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 58)), module, VocalLamma::VOWEL_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 69)), module, VocalLamma::GATE_TRIG_INPUT));
 
 		// Delay knobs
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12, 96)), module, VocalLamma::TIME_PARAM));
@@ -480,12 +503,12 @@ struct VocalLammaWidget : ModuleWidget {
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 108.5)), module, VocalLamma::INPUT_CV_INPUT));
 
 		// Outputs
-		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 120.5)), module, VocalLamma::LEFT_OUTPUT));
+		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 120.5)), module, VocalLamma::LEFT_OUTPUT));
 		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 120.5)), module, VocalLamma::RIGHT_OUTPUT));
 		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 120.5)), module, VocalLamma::PITCH_OUTPUT));
 
 		// Activity light
-		addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(55, 120.5)), module, VocalLamma::VOICE_LIGHT));
+		addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(12, 120.5)), module, VocalLamma::VOICE_LIGHT));
 
 		// Text labels
 		NVGcolor gold = nvgRGBA(0xe8, 0xb3, 0x4a, 0xff);
@@ -493,17 +516,21 @@ struct VocalLammaWidget : ModuleWidget {
 
 		addLabel("VOCAL LAMMA", Vec(45.72, 9.2), 15.f, gold);
 		addLabel("PITCH", Vec(12, 19), 7.f, dim);
+		addLabel("GATE ON", Vec(55, 19), 6.f, dim);
 		addLabel("VOWEL", Vec(76.5, 19), 7.f, gold);
 		addLabel("OO OH AH AY EE", Vec(76.5, 15), 5.f, dim);
 		addLabel("GLIDE", Vec(12, 37), 7.f, dim);
 		addLabel("VIBRATO", Vec(33.5, 37), 7.f, dim);
+		addLabel("FORMANT", Vec(55, 37), 6.5f, dim);
 		addLabel("VOW ATT", Vec(76.5, 37), 6.f, dim);
-		addLabel("GATE ON", Vec(55, 51), 6.f, dim);
 		addLabel("VOICE", Vec(12, 51), 6.5f, dim);
-		addLabel("FORMANT", Vec(33.5, 51), 6.5f, dim);
+		addLabel("VIBR CV", Vec(33.5, 51), 6.5f, dim);
+		addLabel("FORMANT CV", Vec(55, 51), 6.f, dim);
+		addLabel("VOWEL CV", Vec(76.5, 51), 6.5f, dim);
 		addLabel("PITCH CV", Vec(12, 63.5), 6.5f, dim);
-		addLabel("VIBR CV", Vec(33.5, 63.5), 6.5f, dim);
-		addLabel("VOWEL CV", Vec(76.5, 63.5), 6.5f, dim);
+		addLabel("GLIDE CV", Vec(33.5, 63.5), 6.f, dim);
+		addLabel("GATE", Vec(55, 63.5), 6.f, dim);
+		addLabel("GATE TRIG", Vec(76.5, 63.5), 6.f, dim);
 		addLabel("DELAY", Vec(45.72, 81), 9.f, gold);
 		addLabel("TIME", Vec(12, 88), 7.f, dim);
 		addLabel("FEEDBACK", Vec(33.5, 88), 7.f, dim);
@@ -512,7 +539,7 @@ struct VocalLammaWidget : ModuleWidget {
 		addLabel("TIME CV", Vec(12, 102.3), 6.f, dim);
 		addLabel("EXT IN", Vec(33.5, 102.3), 6.f, dim);
 		addLabel("INPUT CV", Vec(76.5, 102.3), 6.f, dim);
-		addLabel("LEFT", Vec(12, 114.5), 5.5f, dim);
+		addLabel("LEFT", Vec(55, 114.5), 5.5f, dim);
 		addLabel("PITCH OUT", Vec(33.5, 114.5), 5.5f, dim);
 		addLabel("RIGHT", Vec(76.5, 114.5), 5.5f, dim);
 	}
@@ -526,7 +553,7 @@ struct VocalLammaWidget : ModuleWidget {
 		}
 	}
 
-	void addLabel(std::string text, math::Vec posMm, float fontSize, NVGcolor color) {
+	void addLabel(const std::string& text, math::Vec posMm, float fontSize, NVGcolor color) {
 		TextLabel* label = new TextLabel(text, fontSize, color);
 		label->box.pos = mm2px(posMm);
 		addChild(label);
