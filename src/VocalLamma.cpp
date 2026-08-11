@@ -77,7 +77,7 @@ static const float VOWEL_FORMANTS[5][3] = {
 };
 
 /** Fixed formant bandwidths (Hz). */
-static const float FORMANT_BW[3] = {60.f, 110.f, 160.f};
+	static const float FORMANT_BW[3] = {90.f, 140.f, 240.f};
 
 } // namespace
 
@@ -292,7 +292,7 @@ struct VocalLamma : Module {
 		vibratoPhase += TAU * 5.5f / sr;
 		if (vibratoPhase > TAU)
 			vibratoPhase -= TAU;
-		float vibrato = vibratoDepth * (0.5f / 12.f) * std::sin(vibratoPhase);
+		float vibrato = vibratoDepth * (1.f / 12.f) * std::sin(vibratoPhase);
 
 		float freq = 8.1758f * std::pow(2.f, pitchLog + vibrato);
 		freq = clamp(freq, 10.f, 20000.f);
@@ -303,7 +303,7 @@ struct VocalLamma : Module {
 		vowelSmoothed += (vowelTarget - vowelSmoothed) * vowelCoef;
 		float formantF[3];
 		getFormants(vowelSmoothed, formantF);
-		float formantScale = 0.7f + 0.6f * clamp(params[FORMANT_PARAM].getValue() + inputs[FORMANT_CV_INPUT].getVoltage() / 10.f + midiFormant, 0.f, 1.f);
+		float formantScale = 0.85f + 0.3f * clamp(params[FORMANT_PARAM].getValue() + inputs[FORMANT_CV_INPUT].getVoltage() / 10.f + midiFormant, 0.f, 1.f);
 		for (int i = 0; i < 3; i++)
 			formantF[i] *= formantScale;
 
@@ -326,15 +326,15 @@ struct VocalLamma : Module {
 			formant[i].set(formantF[i], FORMANT_BW[i], sr);
 		float voice = formant[0].process(source);
 		voice += 0.85f * formant[1].process(source);
-		voice += 0.6f * formant[2].process(source);
+		voice += 0.5f * formant[2].process(source);
 
 		// ---- Breathiness: vowel-coloured noise through the same formants ----
 		for (int i = 0; i < 3; i++)
 			noiseFormant[i].set(formantF[i], FORMANT_BW[i], sr);
-		float noiseIn = random::normal() * 0.9f;
+		float noiseIn = random::normal() * 0.06f;
 		voice += noiseFormant[0].process(noiseIn);
 		voice += 0.85f * noiseFormant[1].process(noiseIn);
-		voice += 0.6f * noiseFormant[2].process(noiseIn);
+		voice += 0.5f * noiseFormant[2].process(noiseIn);
 
 		voice *= params[VOICE_PARAM].getValue();
 
