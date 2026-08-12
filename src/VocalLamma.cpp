@@ -109,6 +109,7 @@ struct VocalLamma : Module {
 		FORMANT_CV_INPUT,
 		GLIDE_CV_INPUT,
 		GATE_TRIG_INPUT,
+		SYNC_INPUT,
 		NUM_INPUTS
 	};
 	enum OutputIds {
@@ -118,7 +119,6 @@ struct VocalLamma : Module {
 		NUM_OUTPUTS
 	};
 	enum LightIds {
-		VOICE_LIGHT,
 		GATE_LIGHT,
 		NUM_LIGHTS
 	};
@@ -128,7 +128,6 @@ struct VocalLamma : Module {
 	float vibratoPhase = 0.f;
 	float vowelSmoothed = 0.5f;
 	float phase = 0.f;
-	float voiceLevel = 0.f;
 	float gateLevel = 1.f;
 	float gateTrigPrev = 0.f;
 	float pitchJitter = 0.f;
@@ -142,6 +141,11 @@ struct VocalLamma : Module {
 	std::array<float, DELAY_BUFFER_SIZE> delayR{};
 	int delayIndex = 0;
 	float delayTime = 0.2f;
+
+	// Tempo sync state
+	float syncPrev = 0.f;
+	int64_t lastSyncFrame = -1;
+	float syncPeriod = 0.2f;
 
 	// MIDI state
 	midi::InputQueue midiInput;
@@ -176,7 +180,8 @@ struct VocalLamma : Module {
 		configInput(INPUT_CV_INPUT, "Input mix CV");
 		configInput(FORMANT_CV_INPUT, "Formant CV");
 		configInput(GLIDE_CV_INPUT, "Glide CV");
-		configInput(GATE_TRIG_INPUT, "Gate trigger");
+		configInput(GATE_TRIG_INPUT, "Gate on trigger");
+		configInput(SYNC_INPUT, "Sync delay");
 
 		configOutput(LEFT_OUTPUT, "Left");
 		configOutput(RIGHT_OUTPUT, "Right");
@@ -207,11 +212,13 @@ struct VocalLamma : Module {
 		delayTime = 0.2f;
 		phase = 0.f;
 		vibratoPhase = 0.f;
-		voiceLevel = 0.f;
 		gateLevel = 1.f;
 		gateTrigPrev = 0.f;
 		pitchJitter = 0.f;
 		oqPhase = 0.f;
+		syncPrev = 0.f;
+		lastSyncFrame = -1;
+		syncPeriod = 0.2f;
 		midiNotes.clear();
 		midiBend = 0.f;
 		midiVibrato = 0.f;
@@ -360,10 +367,33 @@ struct VocalLamma : Module {
 		voice = std::tanh(1.5f * voice) * 3.5f;
 
 		// ---- Stereo ping-pong delay ----
-		float timeVal = clamp(params[TIME_PARAM].getValue() + inputs[TIME_INPUT].getVoltage() / 10.f, 0.f, 1.f);
-		float timeTarget = 0.01f * std::pow(200.f, timeVal);
 		float maxTime = (float) DELAY_BUFFER_SIZE / sr - 0.001f;
-		timeTarget = clamp(timeTarget, 0.005f, maxTime);
+		float timeVal = clamp(params[TIME_PARAM].getValue() + inputs[TIME_INPUT].getVoltage() / 10.f, 0.f, 1.f);
+		float manualTarget = 0.01f * std::pow(200.f, timeVal);
+		manualTarget = clamp(manualTarget, 0.005f, maxTime);
+
+		float timeTarget;
+		if (inputs[SYNC_INPUT].isConnected()) {
+			// Tempo sync: measure the clock period between rising edges and snap
+			// the delay time to the nearest multiple of it (TIME picks the multiple).
+			float syncTrig = inputs[SYNC_INPUT].getVoltage();
+			if (syncTrig > 1.f && syncPrev <= 1.f) {
+				if (lastSyncFrame >= 0 && args.frame > lastSyncFrame) {
+					float period = (float) (args.frame - lastSyncFrame) / sr;
+					if (period >= 0.01f && period <= maxTime)
+						syncPeriod = period;
+				}
+				lastSyncFrame = args.frame;
+			}
+			syncPrev = syncTrig;
+			float n = std::floor(manualTarget / syncPeriod + 0.5f);
+			if (n < 1.f)
+				n = 1.f;
+			timeTarget = clamp(n * syncPeriod, 0.005f, maxTime);
+		}
+		else {
+			timeTarget = manualTarget;
+		}
 		float timeCoef = 1.f - std::exp(-1.f / (0.05f * sr));
 		delayTime += (timeTarget - delayTime) * timeCoef;
 
@@ -396,19 +426,11 @@ struct VocalLamma : Module {
 		float mix = clamp(params[MIX_PARAM].getValue() + midiMix, 0.f, 1.f);
 		float outL = dry * (1.f - mix) + wl * mix;
 		float outR = dry * (1.f - mix) + wr * mix;
-		outL = 10.f * std::tanh(outL / 10.f);
-		outR = 10.f * std::tanh(outR / 10.f);
+		outL = 10.f * std::tanh(outL / 5.f);
+		outR = 10.f * std::tanh(outR / 5.f);
 
 		outputs[LEFT_OUTPUT].setVoltage(outL);
 		outputs[RIGHT_OUTPUT].setVoltage(outR);
-
-		// ---- Activity light (also shows gate state in gate mode) ----
-		float levelCoef = 1.f - std::exp(-1.f / (0.01f * sr));
-		voiceLevel += (std::fabs(voice) - voiceLevel) * levelCoef;
-		float led = voiceLevel * 3.f;
-		if (params[GATE_SWITCH_PARAM].getValue() > 0.5f)
-			led += gateLevel;
-		lights[VOICE_LIGHT].setBrightness(clamp(led, 0.f, 1.f));
 	}
 };
 
@@ -501,14 +523,12 @@ struct VocalLammaWidget : ModuleWidget {
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 108.5)), module, VocalLamma::TIME_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 108.5)), module, VocalLamma::EXT_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 108.5)), module, VocalLamma::INPUT_CV_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 120.5)), module, VocalLamma::SYNC_INPUT));
 
 		// Outputs
 		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 120.5)), module, VocalLamma::LEFT_OUTPUT));
 		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 120.5)), module, VocalLamma::RIGHT_OUTPUT));
 		addOutput(createOutputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 120.5)), module, VocalLamma::PITCH_OUTPUT));
-
-		// Activity light
-		addChild(createLightCentered<SmallLight<GreenLight>>(mm2px(Vec(12, 120.5)), module, VocalLamma::VOICE_LIGHT));
 
 		// Text labels
 		NVGcolor gold = nvgRGBA(0xe8, 0xb3, 0x4a, 0xff);
@@ -530,7 +550,7 @@ struct VocalLammaWidget : ModuleWidget {
 		addLabel("PITCH CV", Vec(12, 63.5), 6.5f, dim);
 		addLabel("GLIDE CV", Vec(33.5, 63.5), 6.f, dim);
 		addLabel("GATE", Vec(55, 63.5), 6.f, dim);
-		addLabel("GATE TRIG", Vec(76.5, 63.5), 6.f, dim);
+		addLabel("GATE ON TRIG", Vec(76.5, 63.5), 6.f, dim);
 		addLabel("DELAY", Vec(45.72, 81), 9.f, gold);
 		addLabel("TIME", Vec(12, 88), 7.f, dim);
 		addLabel("FEEDBACK", Vec(33.5, 88), 7.f, dim);
@@ -539,6 +559,7 @@ struct VocalLammaWidget : ModuleWidget {
 		addLabel("TIME CV", Vec(12, 102.3), 6.f, dim);
 		addLabel("EXT IN", Vec(33.5, 102.3), 6.f, dim);
 		addLabel("INPUT CV", Vec(76.5, 102.3), 6.f, dim);
+		addLabel("SYNC DELAY", Vec(12, 114.5), 5.5f, dim);
 		addLabel("LEFT", Vec(55, 114.5), 5.5f, dim);
 		addLabel("PITCH OUT", Vec(33.5, 114.5), 5.5f, dim);
 		addLabel("RIGHT", Vec(76.5, 114.5), 5.5f, dim);

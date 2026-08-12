@@ -41,6 +41,7 @@ any signal through the delay.
 | **VIBR CV** | Input | Vibrato CV (−10…+10 V). |
 | **VOWEL CV** | Input | Vowel CV (−10…+10 V), scaled by VOW ATT. |
 | **GATE** (jack) | Input | Gate/trigger (sounds while > 1 V when GATE ON is active). |
+| **GATE ON TRIG** | Input | Toggles the GATE ON latch on every rising edge (> 1 V): automates the button. |
 
 ### Delay section (bottom)
 
@@ -53,10 +54,10 @@ any signal through the delay.
 | **TIME CV** | Input | Delay time CV (−10…+10 V). |
 | **EXT IN** | Input | External audio input to the delay. |
 | **INPUT CV** | Input | CV for the INPUT MIX level (0–10 V ≈ 0–100 %). |
+| **SYNC DELAY** | Input | Tempo clock: measures the period between rising edges (> 1 V) and snaps the delay time to the nearest multiple of the clock period. TIME/TIME CV selects the multiple; it is not overridden. |
 | **LEFT** | Output | Left audio output. |
 | **RIGHT** | Output | Right audio output. |
 | **PITCH OUT** | Output | Voice pitch CV (V/oct), glide applied. |
-| **LED** | Light | Voice activity; also shows gate state in gate mode. |
 
 ---
 
