@@ -110,6 +110,8 @@ struct VocalLamma : Module {
 		GLIDE_CV_INPUT,
 		GATE_TRIG_INPUT,
 		SYNC_INPUT,
+		VOICE_MIX_INPUT,
+		MIX_CV_INPUT,
 		NUM_INPUTS
 	};
 	enum OutputIds {
@@ -182,6 +184,8 @@ struct VocalLamma : Module {
 		configInput(GLIDE_CV_INPUT, "Glide CV");
 		configInput(GATE_TRIG_INPUT, "Gate on trigger");
 		configInput(SYNC_INPUT, "Sync delay");
+		configInput(VOICE_MIX_INPUT, "Voice level CV");
+		configInput(MIX_CV_INPUT, "Delay mix CV");
 
 		configOutput(LEFT_OUTPUT, "Left");
 		configOutput(RIGHT_OUTPUT, "Right");
@@ -343,7 +347,8 @@ struct VocalLamma : Module {
 		voice += 0.85f * noiseFormant[1].process(noiseIn);
 		voice += 0.5f * noiseFormant[2].process(noiseIn);
 
-		voice *= params[VOICE_PARAM].getValue();
+		float voiceLevel = clamp(params[VOICE_PARAM].getValue() + inputs[VOICE_MIX_INPUT].getVoltage() / 10.f, 0.f, 1.f);
+		voice *= voiceLevel;
 
 		// ---- Gate trigger: toggle the GATE ON latch on a rising edge ----
 		float gateTrig = inputs[GATE_TRIG_INPUT].getVoltage();
@@ -423,7 +428,7 @@ struct VocalLamma : Module {
 		if (delayIndex >= DELAY_BUFFER_SIZE)
 			delayIndex = 0;
 
-		float mix = clamp(params[MIX_PARAM].getValue() + midiMix, 0.f, 1.f);
+		float mix = clamp(params[MIX_PARAM].getValue() + inputs[MIX_CV_INPUT].getVoltage() / 10.f + midiMix, 0.f, 1.f);
 		float outL = dry * (1.f - mix) + wl * mix;
 		float outR = dry * (1.f - mix) + wr * mix;
 		outL = 10.f * std::tanh(outL / 5.f);
@@ -491,14 +496,33 @@ struct VocalLammaWidget : ModuleWidget {
 			addChild(logo);
 		}
 
+		// Ornamental symbols flanking the DELAY header, slightly above its divider.
+		// SymbolA (yin-yang) is an SVG so its thin ring stays crisp at any zoom;
+		// SymbolB (hand with inner line + spiral) is a 16x supersampled PNG so the
+		// intricate hand-drawn interior pattern survives (raster, via LogoWidget).
+		{
+			SvgWidget* sym = new SvgWidget;
+			sym->setSvg(Svg::load(asset::plugin(pluginInstance, "res/SymbolA.svg")));
+			sym->box.pos = Vec(54.2f, 213.f);
+			sym->box.size = Vec(26.f, 26.f);
+			addChild(sym);
+		}
+		{
+			LogoWidget* sym = new LogoWidget;
+			sym->imagePath = asset::plugin(pluginInstance, "res/SymbolB_hd.png");
+			sym->box.pos = Vec(184.7f, 213.f);
+			sym->box.size = Vec(19.f, 26.f);
+			addChild(sym);
+		}
+
 		// Vocal knobs
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12, 27)), module, VocalLamma::PITCH_PARAM));
+		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(33.5, 27)), module, VocalLamma::VOICE_PARAM));
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(76.5, 27)), module, VocalLamma::VOWEL_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12, 45)), module, VocalLamma::GLIDE_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(33.5, 45)), module, VocalLamma::VIBRATO_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(55, 45)), module, VocalLamma::FORMANT_PARAM));
 		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(76.5, 45)), module, VocalLamma::VOWEL_ATT_PARAM));
-		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(12, 58)), module, VocalLamma::VOICE_PARAM));
 
 		// Gate button (latching, illuminated) next to the VOWEL knob
 		addParam(createParamCentered<VCVBezelLatch>(mm2px(Vec(55, 27)), module, VocalLamma::GATE_SWITCH_PARAM));
@@ -506,22 +530,24 @@ struct VocalLammaWidget : ModuleWidget {
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 69)), module, VocalLamma::GATE_INPUT));
 
 		// Vocal inputs
-		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 69)), module, VocalLamma::PITCH_INPUT));
-		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 69)), module, VocalLamma::GLIDE_CV_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 58)), module, VocalLamma::GLIDE_CV_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 58)), module, VocalLamma::VIBRATO_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 58)), module, VocalLamma::FORMANT_CV_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 58)), module, VocalLamma::VOWEL_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 69)), module, VocalLamma::PITCH_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 69)), module, VocalLamma::VOICE_MIX_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 69)), module, VocalLamma::GATE_TRIG_INPUT));
 
 		// Delay knobs
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(12, 96)), module, VocalLamma::TIME_PARAM));
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(33.5, 96)), module, VocalLamma::FEEDBACK_PARAM));
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(55, 96)), module, VocalLamma::MIX_PARAM));
-		addParam(createParamCentered<RoundSmallBlackKnob>(mm2px(Vec(55, 108.5)), module, VocalLamma::INPUT_MIX_PARAM));
+		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(76.5, 96)), module, VocalLamma::INPUT_MIX_PARAM));
 
 		// Delay inputs
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 108.5)), module, VocalLamma::TIME_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(33.5, 108.5)), module, VocalLamma::EXT_INPUT));
+		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(55, 108.5)), module, VocalLamma::MIX_CV_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(76.5, 108.5)), module, VocalLamma::INPUT_CV_INPUT));
 		addInput(createInputCentered<ThemedPJ301MPort>(mm2px(Vec(12, 120.5)), module, VocalLamma::SYNC_INPUT));
 
@@ -536,6 +562,7 @@ struct VocalLammaWidget : ModuleWidget {
 
 		addLabel("VOCAL LAMMA", Vec(45.72, 9.2), 15.f, gold);
 		addLabel("PITCH", Vec(12, 19), 7.f, dim);
+		addLabel("VOICE", Vec(33.5, 19), 7.f, gold);
 		addLabel("GATE ON", Vec(55, 19), 6.f, dim);
 		addLabel("VOWEL", Vec(76.5, 19), 7.f, gold);
 		addLabel("OO OH AH AY EE", Vec(76.5, 15), 5.f, dim);
@@ -543,19 +570,20 @@ struct VocalLammaWidget : ModuleWidget {
 		addLabel("VIBRATO", Vec(33.5, 37), 7.f, dim);
 		addLabel("FORMANT", Vec(55, 37), 6.5f, dim);
 		addLabel("VOW ATT", Vec(76.5, 37), 6.f, dim);
-		addLabel("VOICE", Vec(12, 51), 6.5f, dim);
+		addLabel("GLIDE CV", Vec(12, 51), 6.5f, dim);
 		addLabel("VIBR CV", Vec(33.5, 51), 6.5f, dim);
 		addLabel("FORMANT CV", Vec(55, 51), 6.f, dim);
 		addLabel("VOWEL CV", Vec(76.5, 51), 6.5f, dim);
 		addLabel("PITCH CV", Vec(12, 63.5), 6.5f, dim);
-		addLabel("GLIDE CV", Vec(33.5, 63.5), 6.f, dim);
+		addLabel("VOICE MIX", Vec(33.5, 63.5), 6.f, dim);
 		addLabel("GATE", Vec(55, 63.5), 6.f, dim);
 		addLabel("GATE ON TRIG", Vec(76.5, 63.5), 6.f, dim);
 		addLabel("DELAY", Vec(45.72, 81), 9.f, gold);
 		addLabel("TIME", Vec(12, 88), 7.f, dim);
 		addLabel("FEEDBACK", Vec(33.5, 88), 7.f, dim);
 		addLabel("MIX", Vec(55, 88), 7.f, dim);
-		addLabel("INPUT MIX", Vec(55, 102.3), 6.f, dim);
+		addLabel("INPUT MIX", Vec(76.5, 88), 6.f, dim);
+		addLabel("MIX CV", Vec(55, 102.3), 6.f, dim);
 		addLabel("TIME CV", Vec(12, 102.3), 6.f, dim);
 		addLabel("EXT IN", Vec(33.5, 102.3), 6.f, dim);
 		addLabel("INPUT CV", Vec(76.5, 102.3), 6.f, dim);

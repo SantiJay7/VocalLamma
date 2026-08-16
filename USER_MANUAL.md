@@ -30,16 +30,19 @@ any signal through the delay.
 | Control | Type | Description |
 | --- | --- | --- |
 | **PITCH** | Knob | Coarse pitch, 0–10 V (V/oct). |
+| **VOICE** | Knob | Voice level (0–1), beside PITCH. |
+| **GATE ON** | Button | Latching, illuminated push button. Off: voice always sounds. On (lit): voice only sounds while gated. |
 | **VOWEL** | Knob | Vowel position: OO → OH → AH → AY → EE. |
-| **VOW ATT** | Knob | Amount of CV applied to Vowel (bipolar: −1…+1). |
 | **GLIDE** | Knob | Portamento time, 0–5 s. |
 | **VIBRATO** | Knob | Vibrato depth (0–1), applied at ~5.5 Hz. |
-| **VOICE** | Knob | Voice level (0–1). |
-| **FORMANT** | Knob | Global formant character/scale (0.7×–1.3×), shifts brightness/timbre. |
-| **GATE ON** | Button | Latching, illuminated push button. Off: voice always sounds. On (lit): voice only sounds while gated. |
-| **PITCH** (jack) | Input | V/oct pitch CV. |
+| **FORMANT** | Knob | Global formant character/scale (0.85×–1.15×), shifts brightness/timbre. |
+| **VOW ATT** | Knob | Amount of CV applied to Vowel (bipolar: −1…+1). |
+| **GLIDE CV** | Input | Glide CV (0–10 V ≈ full range). |
 | **VIBR CV** | Input | Vibrato CV (−10…+10 V). |
+| **FORMANT CV** | Input | Formant CV (−10…+10 V ≈ full range). |
 | **VOWEL CV** | Input | Vowel CV (−10…+10 V), scaled by VOW ATT. |
+| **PITCH** (jack) | Input | V/oct pitch CV. |
+| **VOICE MIX** | Input | CV for the VOICE level (0–10 V ≈ 0–100 %). |
 | **GATE** (jack) | Input | Gate/trigger (sounds while > 1 V when GATE ON is active). |
 | **GATE ON TRIG** | Input | Toggles the GATE ON latch on every rising edge (> 1 V): automates the button. |
 
@@ -53,6 +56,7 @@ any signal through the delay.
 | **INPUT MIX** | Knob | Level of the external audio input (EXT IN) sent into the delay. |
 | **TIME CV** | Input | Delay time CV (−10…+10 V). |
 | **EXT IN** | Input | External audio input to the delay. |
+| **MIX CV** | Input | CV for the delay MIX (0–10 V ≈ full range). |
 | **INPUT CV** | Input | CV for the INPUT MIX level (0–10 V ≈ 0–100 %). |
 | **SYNC DELAY** | Input | Tempo clock: measures the period between rising edges (> 1 V) and snaps the delay time to the nearest multiple of the clock period. TIME/TIME CV selects the multiple; it is not overridden. |
 | **LEFT** | Output | Left audio output. |
@@ -100,7 +104,8 @@ Connect a MIDI device via the module's right-click context menu
 
 ## Technical notes
 
-- Panel: 18 HP, custom SVG with the user's llama logo.
+- Panel: 18 HP, custom SVG with the user's llama logo and two ornamental gold
+  symbols flanking the DELAY header.
 - Source: glottal pulse (Rosenberg–Klatt) blended with a PolyBLEP sawtooth;
   three parallel RBJ band-pass filters with average-male formant frequencies.
 - Voice realism: vowel-coloured breath noise (same formant filters), slow pitch

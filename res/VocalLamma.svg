@@ -21,10 +21,6 @@
   <rect x="70" y="33" width="130" height="2" rx="1" fill="url(#gold)"/>
 
 
-  <!-- Flanking diamonds for the DELAY header -->
-  <polygon points="98,222 102,226 98,230 94,226" fill="#e8b34a" opacity="0.55"/>
-  <polygon points="172,222 176,226 172,230 168,226" fill="#e8b34a" opacity="0.55"/>
-
   <!-- Delay section divider -->
   <rect x="16" y="242" width="238" height="1.5" rx="0.75" fill="url(#gold)" opacity="0.8"/>
 
